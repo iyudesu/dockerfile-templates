@@ -1,31 +1,72 @@
-# Build the application from source
-FROM public.ecr.aws/docker/library/golang:1.24.2-alpine3.21 AS builder
+############################
+# ---- Build Stage ----
+############################
+FROM public.ecr.aws/docker/library/golang:1.26-alpine3.23 AS builder
+
+# ---- Build arguments ----
+ARG APP_NAME=healthcheck
+ARG VERSION=1.0.0
+ARG COMMIT=unknown
+
+# ---- Environment variables ----
+ENV CGO_ENABLED=0 \
+    GOOS=linux \
+    GOARCH=amd64
+
+# Install certificates (for HTTPS calls if needed)
+RUN apk add --no-cache ca-certificates
 
 WORKDIR /app
 
-# Copy the rest of the application code
-COPY . ./
+# Copy go module files first (better caching)
+# COPY go.mod go.sum ./
+COPY go.mod ./
+RUN go mod download
 
-# Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -o /healthcheck
+# Copy application source
+COPY . .
 
-# Run the tests in the container
+# Build binary with security flags
+RUN go build \
+    -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
+    -o /${APP_NAME}
+
+# Optional: Run tests
 FROM builder AS run-test
 RUN go test -v ./...
 
-# Deploy the application binary into a lean image
-FROM public.ecr.aws/docker/library/alpine:3.21.3 AS build-release-stage
+############################
+# ---- Production Stage ----
+############################
+FROM public.ecr.aws/docker/library/alpine:3.23.3
+
+# ---- Runtime arguments ----
+ARG APP_NAME=healthcheck
+
+# ---- Runtime environment ----
+ENV APP_ENV=production \
+    APP_PORT=8080 \
+    TZ=UTC
+
+# Install minimal required packages only
+RUN apk add --no-cache ca-certificates tzdata \
+    && addgroup appgroup \
+    && adduser -D appuser -G appgroup
 
 WORKDIR /app
 
-# Copy the binary from the build stage
-COPY --from=builder /healthcheck /healthcheck
+# Copy binary from builder
+COPY --from=builder /${APP_NAME} /usr/local/bin/${APP_NAME}
 
-# Create directory
-RUN mkdir /tmp/ready
+# Create necessary directories with correct ownership
+RUN mkdir -p /tmp/ready \
+    # && chown -R appuser:appgroup /tmp/ready \ # Set owner
+    && chmod -R 440 /tmp/ready
 
-# Expose port 8080 for the application
+# Use non-root user
+USER appuser
+
 EXPOSE 8080
 
-# Set the entrypoint to the Go app
-ENTRYPOINT ["/healthcheck"]
+# Run as non-root
+ENTRYPOINT ["/usr/local/bin/healthcheck"]
