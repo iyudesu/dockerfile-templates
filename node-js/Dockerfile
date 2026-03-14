@@ -1,43 +1,5 @@
-# # Install dependencies only when needed
-# FROM public.ecr.aws/docker/library/node:23.11.0-alpine3.21 AS builder
-
-# # Check https://github.com/nodejs/docker-node/tree/b4117f9333da4138b03a546ec926ef50a31506c3#nodealpine to understand why libc6-compat might be needed.
-# RUN apk add --no-cache libc6-compat
-
-# WORKDIR /app
-
-# # Copy config before dependency installation
-# COPY package*.json ./
-
-# # Install dependencies
-# RUN npm ci
-
-# # Copy the rest of the application files
-# COPY . .
-
-# # Second image, copy all the files and run next
-# FROM public.ecr.aws/docker/library/node:23.11.0-alpine3.21 AS runner
-
-# # Set the working directory
-# WORKDIR /app
-
-# # Update libraries
-# RUN apk update
-
-# # Copy config
-# COPY --from=builder /app ./
-
-# # Create directory
-# RUN mkdir /tmp/ready
-
-# # Expose port 8080 for the application
-# EXPOSE 8080
-
-# # Command to run the application
-# ENTRYPOINT ["node","app.js"]
-
 ############################
-# 1️⃣ Builder Stage
+# ---- Build Stage ----
 ############################
 FROM public.ecr.aws/docker/library/node:23.11.0-alpine3.21 AS builder
 
@@ -59,14 +21,20 @@ WORKDIR ${APP_HOME}
 COPY package*.json ./
 
 # Install only production dependencies
-RUN npm ci --omit=dev && \
+RUN npm ci && \
     npm cache clean --force
 
 # Copy application source
 COPY . .
 
+# Build application
+RUN npm run build
+
+# Remove dev dependencies after build
+RUN npm prune --omit=dev
+
 ############################
-# 2️⃣ Runtime Stage
+# ---- Production Stage ----
 ############################
 FROM public.ecr.aws/docker/library/node:23.11.0-alpine3.21 AS runner
 
@@ -82,8 +50,10 @@ RUN addgroup nodegroup && \
 # Set working directory
 WORKDIR ${APP_HOME}
 
-# Copy built app from builder
-COPY --from=builder /app ./
+# Copy ONLY required runtime artifacts
+COPY --from=builder /app/package*.json ./
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
 
 # Remove unnecessary files
 RUN rm -rf \
@@ -93,8 +63,10 @@ RUN rm -rf \
 
 # Create required directory with correct permissions
 RUN mkdir -p /tmp/ready \
-    # chown -R nodeuser:nodegroup /tmp/ready # Set owner
-    && chmod -R 440 /tmp/ready
+    # Set owner
+    # && chown -R nodeuser:appgroup /tmp/ready \
+    # Set scope
+    && chmod -R 550 /tmp/ready 
 
 # Switch to non-root user
 USER nodeuser
@@ -103,4 +75,4 @@ USER nodeuser
 EXPOSE ${PORT}
 
 # Use CMD instead of ENTRYPOINT for better override flexibility
-CMD ["node", "app.js"]
+CMD ["node", "dist/app.js"]

@@ -60,8 +60,10 @@ COPY --from=builder /${APP_NAME} /usr/local/bin/${APP_NAME}
 
 # Create necessary directories with correct ownership
 RUN mkdir -p /tmp/ready \
-    # && chown -R appuser:appgroup /tmp/ready \ # Set owner
-    && chmod -R 440 /tmp/ready
+    # Set owner
+    # && chown -R appuser:appgroup /tmp/ready \
+    # Set scope
+    && chmod -R 550 /tmp/ready 
 
 # Use non-root user
 USER appuser

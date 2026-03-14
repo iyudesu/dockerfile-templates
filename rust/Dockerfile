@@ -32,16 +32,23 @@ ENV APP_HOME=/app \
 WORKDIR /app
 
 # Update libraries
-RUN apk update && \
-    apk add --no-cache ca-certificates
+RUN apk update \
+    && apk add --no-cache ca-certificates \
+    && addgroup appgroup \
+    && adduser -D appuser -G appgroup
 
 # Copy the built binary from the builder stage, binary name check when test build on local
 COPY --from=builder /app/target/release/rust .
 
 # Create directory
-RUN mkdir -p /tmp/ready && \
-    # chown -R ${APP_UID}:${APP_GID} /tmp/ready # set owner
-    chmod -R 440 /tmp/ready
+RUN mkdir -p /tmp/ready \
+    # set owner
+    # chown -R ${APP_UID}:${APP_GID} /tmp/ready
+    # Set scope
+    && chmod -R 550 /tmp/ready 
+
+# Use non-root user
+USER appuser
 
 # Expose port
 EXPOSE 8080
